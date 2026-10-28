@@ -162,19 +162,15 @@ function getThresholdValueFunction(
     case "anthropic":
       return anthropicThresholdValue;
     default:
-      // Reseller providers (bedrock, helicone, openrouter, azure, ...) do not
-      // define their own threshold semantics, so fall back to the model
-      // author's tiering rules.
-      switch (author) {
-        case "anthropic":
-          return anthropicThresholdValue;
-        case "google":
-        case "xai":
-        case "openai":
-          return totalPromptThresholdValue;
-        default:
-          return () => 0;
+      // Reseller providers (bedrock, helicone, openrouter, azure, ...) pass
+      // through Anthropic's tiered Claude pricing: Anthropic defines the
+      // prompt length for its tiers as all input tokens including cache
+      // reads and cache writes, and AWS documents the same <=200K/>200K
+      // Claude rates on Bedrock.
+      if (author === "anthropic") {
+        return anthropicThresholdValue;
       }
+      return () => 0;
   }
 }
 
