@@ -437,3 +437,63 @@ describe("modelCostBreakdownFromRegistry", () => {
     });
   });
 });
+
+describe("tiered pricing thresholds on reseller providers", () => {
+  // https://github.com/Helicone/helicone/issues/5767
+  it("applies the >200k tier for Claude via bedrock", () => {
+    const breakdown = modelCostBreakdownFromRegistry({
+      modelUsage: { input: 250000, output: 0 },
+      providerModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      provider: "bedrock" as ModelProviderName,
+    });
+    expect(breakdown).not.toBeNull();
+    // >200k tier input rate: $6.00 per 1M tokens
+    expect(breakdown!.inputCost).toBe(1.5);
+  });
+
+  it("keeps the base tier for Claude via bedrock below 200k prompt tokens", () => {
+    const breakdown = modelCostBreakdownFromRegistry({
+      modelUsage: { input: 150000, output: 0 },
+      providerModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      provider: "bedrock" as ModelProviderName,
+    });
+    expect(breakdown).not.toBeNull();
+    expect(breakdown!.inputCost).toBeCloseTo(0.45, 9);
+  });
+
+  it("counts cache tokens toward the Claude tier threshold on bedrock", () => {
+    const breakdown = modelCostBreakdownFromRegistry({
+      modelUsage: {
+        input: 180000,
+        output: 0,
+        cacheDetails: { cachedInput: 40000 },
+      },
+      providerModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      provider: "bedrock" as ModelProviderName,
+    });
+    expect(breakdown).not.toBeNull();
+    // total prompt = 220k > 200k threshold -> tiered rate
+    expect(breakdown!.inputCost).toBeCloseTo(1.08, 9);
+  });
+
+  it("applies the >200k tier for Claude via helicone", () => {
+    const breakdown = modelCostBreakdownFromRegistry({
+      modelUsage: { input: 250000, output: 0 },
+      providerModelId: "pa/claude-sonnet-4-5-20250929",
+      provider: "helicone" as ModelProviderName,
+    });
+    expect(breakdown).not.toBeNull();
+    expect(breakdown!.inputCost).toBe(1.5);
+  });
+
+  it("applies the >272k tier for GPT-5.4 via openrouter", () => {
+    const breakdown = modelCostBreakdownFromRegistry({
+      modelUsage: { input: 300000, output: 0 },
+      providerModelId: "openai/gpt-5.4",
+      provider: "openrouter" as ModelProviderName,
+    });
+    expect(breakdown).not.toBeNull();
+    // >272k tier input rate: $5.275 per 1M tokens
+    expect(breakdown!.inputCost).toBeCloseTo(1.5825, 9);
+  });
+});
