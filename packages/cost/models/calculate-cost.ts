@@ -1,5 +1,5 @@
 import type { ModelUsage, ModalityUsage } from "../usage/types";
-import type { ModelProviderConfig, ModelPricing, ModalityPricing } from "./types";
+import type { AuthorName, ModelProviderConfig, ModelPricing, ModalityPricing } from "./types";
 import type { ModelProviderName } from "./providers";
 import { registry } from "./registry";
 
@@ -111,7 +111,38 @@ function getPricingTier(
   return preprocessedPricing[matchedTierIndex];
 }
 
-function getThresholdValueFunction(provider: ModelProviderName): (usage: ModelUsage, field: CostBreakdownField) => number {
+// Threshold semantics shared by the model author. Anthropic bills its tiered
+// models off the total prompt (input + cached input + cache writes); Google,
+// xAI and OpenAI bill off the total prompt length (input + cached input).
+const anthropicThresholdValue = (usage: ModelUsage, field: CostBreakdownField): number => {
+  switch (field) {
+    case "inputCost":
+    case "outputCost":
+      return usage.input +
+        (usage.cacheDetails?.cachedInput ?? 0) +
+        (usage.cacheDetails?.write5m ?? 0) +
+        (usage.cacheDetails?.write1h ?? 0);
+    default:
+      return 0;
+  }
+};
+
+const totalPromptThresholdValue = (usage: ModelUsage, field: CostBreakdownField): number => {
+  switch (field) {
+    case "inputCost":
+    case "outputCost":
+    case "cachedInputCost":
+      // total prompt length
+      return usage.input + (usage.cacheDetails?.cachedInput ?? 0);
+    default:
+      return 0;
+  }
+};
+
+function getThresholdValueFunction(
+  provider: ModelProviderName,
+  author: AuthorName,
+): (usage: ModelUsage, field: CostBreakdownField) => number {
   switch (provider) {
     case "vertex":
       return (usage: ModelUsage, field: CostBreakdownField) => {
@@ -123,46 +154,27 @@ function getThresholdValueFunction(provider: ModelProviderName): (usage: ModelUs
             return usage.cacheDetails?.cachedInput ?? 0;
           default:
             return 0;
-        } 
+        }
       };
     case "google-ai-studio":
-      return (usage: ModelUsage, field: CostBreakdownField) => {
-        switch (field) {
-          case "inputCost":
-          case "outputCost":
-          case "cachedInputCost":
-            // total prompt length
-            return usage.input + (usage.cacheDetails?.cachedInput ?? 0);
-          default:
-            return 0;
-        }
-      }
-    case "anthropic":
-      return (usage: ModelUsage, field: CostBreakdownField) => {
-        switch (field) {
-          case "inputCost":
-          case "outputCost":
-            return usage.input + 
-              (usage.cacheDetails?.cachedInput ?? 0) + 
-              (usage.cacheDetails?.write5m ?? 0) + 
-              (usage.cacheDetails?.write1h ?? 0);
-          default:
-            return 0;
-        }
-      }
     case "xai":
-      return (usage: ModelUsage, field: CostBreakdownField) => {
-        switch (field) {
-          case "inputCost":
-          case "outputCost":
-          case "cachedInputCost":
-            return usage.input + (usage.cacheDetails?.cachedInput ?? 0);
-          default:
-            return 0;
-        }
-      }
+      return totalPromptThresholdValue;
+    case "anthropic":
+      return anthropicThresholdValue;
     default:
-      return () => 0;
+      // Reseller providers (bedrock, helicone, openrouter, azure, ...) do not
+      // define their own threshold semantics, so fall back to the model
+      // author's tiering rules.
+      switch (author) {
+        case "anthropic":
+          return anthropicThresholdValue;
+        case "google":
+        case "xai":
+        case "openai":
+          return totalPromptThresholdValue;
+        default:
+          return () => 0;
+      }
   }
 }
 
@@ -186,7 +198,7 @@ export function calculateModelCostBreakdown(params: {
   // e.g Anthropic's inputCost and output cost is higher if PROMPT >= X tokens
   // e.g Vertex's inputCost is higher if INPUT >= X tokens, but cachedInputCost is higher if CACHED_INPUT >= X tokens
   // getThresholdValue is a function that will return the value to compare to X
-  const getThresholdValue = getThresholdValueFunction(provider);
+  const getThresholdValue = getThresholdValueFunction(provider, config.author);
   const sortedPricing = [...config.pricing].sort((a, b) => a.threshold - b.threshold);
   // Preprocess pricing tiers once upfront to fill missing fields from previous tiers
   const preprocessedPricing = preprocessPricingTiers(sortedPricing);
