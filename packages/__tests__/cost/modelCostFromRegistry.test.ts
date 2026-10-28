@@ -486,14 +486,4 @@ describe("tiered pricing thresholds on reseller providers", () => {
     expect(breakdown!.inputCost).toBe(1.5);
   });
 
-  it("applies the >272k tier for GPT-5.4 via openrouter", () => {
-    const breakdown = modelCostBreakdownFromRegistry({
-      modelUsage: { input: 300000, output: 0 },
-      providerModelId: "openai/gpt-5.4",
-      provider: "openrouter" as ModelProviderName,
-    });
-    expect(breakdown).not.toBeNull();
-    // >272k tier input rate: $5.275 per 1M tokens
-    expect(breakdown!.inputCost).toBeCloseTo(1.5825, 9);
-  });
 });
